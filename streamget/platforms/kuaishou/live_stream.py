@@ -25,19 +25,27 @@ class KwaiLiveStream(BaseLiveStream):
         Returns:
             dict: A dictionary containing anchor name, live status, room URL, and title.
         """
+        if 'v.kuaishou.com/' in url:
+            url = await async_req(url, proxy_addr=self.proxy_addr, headers=self.pc_headers, redirect_url=True)
+        
+        if 'live.kuaishou.com/profile/' in url:
+            url= url.replace('/profile/', '/u/', 1)
+        elif 'www.kuaishou.com/profile/' in url:
+            url= url.replace('www.kuaishou.com/profile/', 'live.kuaishou.com/u/', 1)
+        if 'live.kuaishou.com/u/' not in url:
+            raise Exception(f'Error: Invalid URL {url}"')
+        url=url.split('?')[0]
+        
+        html_str = await async_req(url=url, proxy_addr=self.proxy_addr, headers=self.pc_headers)
         try:
-            html_str = await async_req(url=url, proxy_addr=self.proxy_addr, headers=self.pc_headers)
-        except Exception as e:
-            raise Exception(f"Failed to fetch data from {url}.{e}")
-
-        try:
-            json_str = re.search('<script>window.__INITIAL_STATE__=(.*?);\\(function\\(\\)\\{var s;', html_str).group(1)
-            play_list = re.findall('(\\{"liveStream".*?),"gameInfo', json_str)[0] + "}"
-            play_list = json.loads(play_list)
+            json_str_matchs= re.search('<script>window.__INITIAL_STATE__=(.*?);\\(function\\(\\)\\{var s;', html_str)
+            json_str = json_str_matchs.group(1)
+            play_list_str = re.findall('(\\{"liveStream".*?),"gameInfo', json_str)[0] + "}"
+            play_list = json.loads(play_list_str)
         except (AttributeError, IndexError, json.JSONDecodeError) as e:
             raise Exception(f"Failed to parse JSON data from {url}. Error: {e}")
 
-        result = {"type": 2, "is_live": False}
+        result = {"type": 2, "is_live": False,"fixed_url":url}
 
         if 'errorType' in play_list or 'liveStream' not in play_list:
             error_msg = play_list['errorType']['title'] + play_list['errorType']['content']
@@ -64,12 +72,16 @@ class KwaiLiveStream(BaseLiveStream):
         """
         Fetches the stream URL for a live room and wraps it into a StreamData object.
         """
+        print(json_data)
         platform = "快手直播"
+
         if json_data['type'] == 1 and not json_data["is_live"]:
             json_data |= {"platform": platform}
+            if 'fixed_url' in json_data:
+                json_data['extra']={'fixed_url':json_data['fixed_url']}
             return wrap_stream(json_data)
+        
         live_status = json_data['is_live']
-
         result = {
             "platform": platform,
             "anchor_name": json_data['anchor_name'],
@@ -111,5 +123,7 @@ class KwaiLiveStream(BaseLiveStream):
                     result |= {'flv_url': flv_url, 'record_url': flv_url}
             result['is_live'] = True
             result['quality'] = video_quality
+        if 'fixed_url' in json_data:
+            result['extra']={'fixed_url':json_data['fixed_url']}
         return wrap_stream(result)
 
