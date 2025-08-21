@@ -5,7 +5,6 @@ import urllib.parse
 from ...data import StreamData, wrap_stream
 from ...requests.async_http import async_req, get_response_status
 from ..base import BaseLiveStream
-from .utils import DouyinUtils, UnsupportedUrlError
 
 
 class DouyinLiveStream(BaseLiveStream):
@@ -25,53 +24,6 @@ class DouyinLiveStream(BaseLiveStream):
             'referer': 'https://live.douyin.com/'
         }
 
-    async def fetch_app_stream_data(self, url: str, process_data: bool = True) -> dict:
-        """
-        Fetches app stream data for a live room.
-
-        Args:
-            url (str): The room URL.
-            process_data (bool): Whether to process the data. Defaults to True.
-
-        Returns:
-            dict: A dictionary containing anchor name, live status, room URL, and title.
-        """
-        url = url.strip()
-        douyin_utils = DouyinUtils()
-        try:
-            room_id, sec_uid = await douyin_utils.get_sec_user_id(url, proxy_addr=self.proxy_addr)
-            app_params = {
-                "verifyFp": "verify_lxj5zv70_7szNlAB7_pxNY_48Vh_ALKF_GA1Uf3yteoOY",
-                "type_id": "0",
-                "live_id": "1",
-                "room_id": room_id,
-                "sec_user_id": sec_uid,
-                "version_code": "99.99.99",
-                "app_id": "1128"
-            }
-            api = 'https://webcast.amemv.com/webcast/room/reflow/info/?' + urllib.parse.urlencode(app_params)
-            json_str = await async_req(api, proxy_addr=self.proxy_addr, headers=self.mobile_headers)
-            if not process_data:
-                return json.loads(json_str)
-            else:
-                json_data = json.loads(json_str)['data']
-                room_data = json_data['room']
-                room_data['anchor_name'] = room_data['owner']['nickname']
-                stream_data = room_data['stream_url']['live_core_sdk_data']['pull_data']['stream_data']
-                origin_data = json.loads(stream_data)['data']['origin']['main']
-                sdk_params = json.loads(origin_data['sdk_params'])
-                origin_hls_codec = sdk_params.get('VCodec') or ''
-                origin_m3u8 = {'ORIGIN': origin_data["hls"] + '&codec=' + origin_hls_codec}
-                origin_flv = {'ORIGIN': origin_data["flv"] + '&codec=' + origin_hls_codec}
-                hls_pull_url_map = room_data['stream_url']['hls_pull_url_map']
-                flv_pull_url = room_data['stream_url']['flv_pull_url']
-                room_data['stream_url']['hls_pull_url_map'] = {**origin_m3u8, **hls_pull_url_map}
-                room_data['stream_url']['flv_pull_url'] = {**origin_flv, **flv_pull_url}
-                return room_data
-
-        except UnsupportedUrlError:
-            unique_id = await douyin_utils.get_unique_id(url, proxy_addr=self.proxy_addr)
-            return await self.fetch_web_stream_data('https://live.douyin.com/' + unique_id)
 
     async def fetch_web_stream_data(self, url: str, process_data: bool = True) -> dict:
         """
@@ -85,7 +37,36 @@ class DouyinLiveStream(BaseLiveStream):
             dict: A dictionary containing anchor name, live status, room URL, and title.
         """
         try:
-            url = url.strip()
+            if 'douyin.com/follow/live/' in url:
+                #https://www.douyin.com/follow/live/71967971105
+                url=await async_req(url, proxy_addr=self.proxy_addr, headers=self.pc_headers, redirect_url=True)
+            elif 'v.douyin.com/' in url or 'douyin.com/user/' in url:
+                if 'v.douyin.com' in url:
+                    url = await async_req(url, proxy_addr=self.proxy_addr, headers=self.pc_headers, redirect_url=True)
+                    parsed_url = urllib.parse.urlparse(url)
+                    query_params = urllib.parse.parse_qs(parsed_url.query)
+                    if 'sec_uid' in query_params:
+                        sec_uid = query_params['sec_uid'][0]
+                    elif 'sec_user_id' in query_params:
+                        sec_uid = query_params['sec_user_id'][0]
+                    else:
+                        raise Exception("Could not find sec_user_id  or sec_uid in the redirect URL")
+                else:
+                    #https://www.douyin.com/user/MS4wLjABAAAAfJdQBvOV3r8BEC7SSnDGmkUIJ_I3mggDO2TeeRUmBSqRVRjhTdzkiGtEIqyLLONV
+                    sec_uid = url.split('?')[0].rsplit('douyin.com/user/', maxsplit=1)[-1] 
+                #把 sec_uid 转换成数字 uid
+                api_url = f"https://www.iesdouyin.com/web/api/v2/user/info?sec_uid={sec_uid}"
+                json_str = await async_req(api_url,proxy_addr=self.proxy_addr, headers=self.pc_headers)
+                json_data=json.loads(json_str)
+                if 'user_info' in json_data and 'unique_id' in json_data['user_info']:
+                    unique_id=str(json_data["user_info"]["unique_id"])
+                else:
+                    raise Exception(f"Could not get unique_id from {api_url}")
+                url=f"https://live.douyin.com/{unique_id}"
+                
+            if 'live.douyin.com/' not in url:
+                raise Exception(f'Error: Invalid douyin live room URL {url}')
+            
             origin_url_list = None
             html_str = await async_req(url, proxy_addr=self.proxy_addr, headers=self.pc_headers)
             match_json_str = re.search(r'(\{\\"state\\":.*?)]\\n"]\)', html_str)
@@ -100,6 +81,8 @@ class DouyinLiveStream(BaseLiveStream):
                 return json.loads(room_store)
             else:
                 json_data = json.loads(room_store)['roomInfo']['room']
+                #返回修正过的直播间地址,方便下次直接用修正过的直播间地址，减少请求次数
+                json_data['fixed_url']=url
                 json_data['anchor_name'] = anchor_name
                 if 'status' in json_data and json_data['status'] == 4:
                     return json_data
@@ -164,4 +147,7 @@ class DouyinLiveStream(BaseLiveStream):
                 'flv_url': flv_url,
                 'record_url': m3u8_url or flv_url,
             }
+        if 'fixed_url' in json_data:
+            #返回修正过的直播间地址,方便下次直接用修正过的直播间地址，减少请求次数
+            result['extra']={'fixed_url':json_data['fixed_url']}
         return wrap_stream(result)
