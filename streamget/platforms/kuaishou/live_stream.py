@@ -77,8 +77,7 @@ class KwaiLiveStream(BaseLiveStream):
 
         if json_data['type'] == 1 and not json_data["is_live"]:
             json_data |= {"platform": platform}
-            if 'fixed_url' in json_data:
-                json_data['extra']={'fixed_url':json_data['fixed_url']}
+            json_data['extra']={'fixed_url':json_data.pop('fixed_url',None)}
             return wrap_stream(json_data)
         
         live_status = json_data['is_live']
@@ -123,7 +122,7 @@ class KwaiLiveStream(BaseLiveStream):
                     result |= {'flv_url': flv_url, 'record_url': flv_url}
             result['is_live'] = True
             result['quality'] = video_quality
-        if 'fixed_url' in json_data:
-            result['extra']={'fixed_url':json_data['fixed_url']}
+
+        result['extra']={'fixed_url':json_data.pop('fixed_url',None)}
         return wrap_stream(result)
 
