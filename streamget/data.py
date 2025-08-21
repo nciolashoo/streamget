@@ -97,7 +97,7 @@ def wrap_stream(data: dict) -> StreamData:
         raise TypeError("Input must be a dictionary")
 
     required_fields = ["platform", "anchor_name", "is_live", "title", "quality", "m3u8_url", "flv_url", "record_url"]
-    optional_fields = ["new_cookies", "new_token"]
+    optional_fields = ["new_cookies", "new_token","extra"]
 
     for field in required_fields + optional_fields:
         if field not in data:
