@@ -68,7 +68,7 @@ class JDLiveStream(BaseLiveStream):
                 #尝试所有途径获取authorId失败，抛出异常
                 raise Exception('Error: The live room URL has expired. Please use the URL of the currently active live stream.')
                                 
-        
+        result['fixed_url']=f"https://eco.m.jd.com/content/dr_home/index.html?authorId={author_id}"
         data = {
                 'functionId': 'talent_head_findTalentMsg',
                 'appid': 'dr_detail',
@@ -108,4 +108,5 @@ class JDLiveStream(BaseLiveStream):
         Fetches the stream URL for a live room and wraps it into a StreamData object.
         """
         json_data |= {"platform": "京东直播"}
+        json_data['extra']={'fixed_url':json_data.pop('fixed_url',None)}
         return wrap_stream(json_data)
