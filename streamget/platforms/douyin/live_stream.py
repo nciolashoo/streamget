@@ -68,7 +68,7 @@ class DouyinLiveStream(BaseLiveStream):
                 raise Exception(f'Error: Invalid douyin live room URL {url}')
             
             origin_url_list = None
-            html_str = await async_req(url, proxy_addr=self.proxy_addr, headers=self.pc_headers)
+            html_str = await async_req(url, proxy_addr=self.proxy_addr, headers=self.pc_headers)            
             match_json_str = re.search(r'(\{\\"state\\":.*?)]\\n"]\)', html_str)
             if not match_json_str:
                 match_json_str = re.search(r'(\{\\"common\\":.*?)]\\n"]\)</script><div hidden', html_str)
@@ -77,6 +77,13 @@ class DouyinLiveStream(BaseLiveStream):
             room_store = re.search('"roomStore":(.*?),"linkmicStore"', cleaned_string, re.DOTALL).group(1)
             anchor_name = re.search('"nickname":"(.*?)","avatar_thumb', room_store, re.DOTALL).group(1)
             room_store = room_store.split(',"has_commerce_goods"')[0] + '}}}'
+            #网页提取的json_str里，直播间的title是由用户填写的，允许提交带双引号的内容，会导致json解析失败
+            #错误样本https://live.douyin.com/wangjing668899            
+            matches= re.search(r'"title":"(.*?)","user_count_str"', room_store, re.DOTALL)
+            if matches:
+                title=matches.group(1)
+                new_title=title.replace('"',"").replace("'","")
+                room_store=room_store.replace(title,new_title)
             if not process_data:
                 return json.loads(room_store)
             else:
@@ -147,7 +154,5 @@ class DouyinLiveStream(BaseLiveStream):
                 'flv_url': flv_url,
                 'record_url': m3u8_url or flv_url,
             }
-        if 'fixed_url' in json_data:
-            #返回修正过的直播间地址,方便下次直接用修正过的直播间地址，减少请求次数
-            result['extra']={'fixed_url':json_data['fixed_url']}
+        result['extra']={'fixed_url':json_data.pop('fixed_url',None)}
         return wrap_stream(result)
